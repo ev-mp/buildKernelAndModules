@@ -14,8 +14,13 @@ fi
 
 cd "$SOURCE_TARGET"
 echo "$PWD"
+echo Evgeni arrived!
 
-wget -N https://developer.nvidia.com/embedded/dlc/r32-3-1_Release_v1.0/Sources/T210/public_sources.tbz2
+#https://developer.nvidia.com/embedded/L4T/r32_Release_v4.3/Sources/T210/public_sources.tbz2
+#Evgeni Requires authentication - downloaded from https://developer.nvidia.com/embedded/linux-tegra
+#wget -N https://developer.nvidia.com/embedded/L4T/r32_Release_v4.3/Sources/T210/public_sources.tbz2
+cp ~/Downloads/public_sources.tbz2 .
+        
 # l4t-sources is a tbz2 file
 tar -xvf public_sources.tbz2  Linux_for_Tegra/source/public/kernel_src.tbz2 --strip-components=3
 tar -xvf kernel_src.tbz2

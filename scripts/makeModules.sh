@@ -11,6 +11,8 @@ cd "$SOURCE_TARGET"kernel/kernel-4.9
 # Get the number of CPUs 
 NUM_CPU=$(nproc)
 
+#Evgeni
+time make -j$(($NUM_CPU - 1)) modules_prepare
 # Make the kernel Image 
 time make -j$(($NUM_CPU - 1)) modules
 if [ $? -eq 0 ] ; then
