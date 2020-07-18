@@ -85,6 +85,10 @@ echo "Build Kernel Monolythic image"
 
 
 sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT -j$(($(nproc)-1))
+
+sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_install
+sudo cp ${TEGRA_KERNEL_OUT}arch/arm64/boot/Image /boot/Image
+sudo cp -r ${TEGRA_KERNEL_OUT}arch/arm64/boot/dts/* /boot/dtb/
 #sudo -s time make -j$(($(nproc)-1)) modules_prepare
 #sudo -s time make -j$(($(nproc)-1)) Image
 #sudo -s time make -j$(($(nproc)-1)) modules
