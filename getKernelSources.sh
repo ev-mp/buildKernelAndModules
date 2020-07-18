@@ -21,10 +21,10 @@ JETSON_L4T=""
 function check_L4T_version()
 {   
         if [ -f /etc/nv_tegra_release ]; then
-		JETSON_L4T_STRING=$(head -n 1 /etc/nv_tegra_release)
-		JETSON_L4T_RELEASE=$(echo $JETSON_L4T_STRING | cut -f 2 -d ' ' | grep -Po '(?<=R)[^;]+')
-		JETSON_L4T_REVISION=$(echo $JETSON_L4T_STRING | cut -f 2 -d ',' | grep -Po '(?<=REVISION: )[^;]+')
-                JETSON_L4T_VERSION=$JETSON_L4T_RELEASE.$JETSON_L4T_REVISION
+			JETSON_L4T_STRING=$(head -n 1 /etc/nv_tegra_release)
+			JETSON_L4T_RELEASE=$(echo $JETSON_L4T_STRING | cut -f 2 -d ' ' | grep -Po '(?<=R)[^;]+')
+			JETSON_L4T_REVISION=$(echo $JETSON_L4T_STRING | cut -f 2 -d ',' | grep -Po '(?<=REVISION: )[^;]+')
+			JETSON_L4T_VERSION=$JETSON_L4T_RELEASE.$JETSON_L4T_REVISION
 
 	else
 		echo "$LOG Reading L4T version from \"dpkg-query --show nvidia-l4t-core\""
