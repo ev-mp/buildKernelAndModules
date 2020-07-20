@@ -82,10 +82,12 @@ sudo sed -i '/CONFIG_HID_SENSOR_IIO_COMMON/c\CONFIG_HID_SENSOR_IIO_COMMON=m\nCON
 pwd
 
 echo "Build Kernel Monolythic image"
-
-
+#Clean hte previous build
+sudo make mrproper
+#Build module image 
 sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT -j$(($(nproc)-1))
-
+sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_prepare
+sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules
 sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_install
 sudo cp ${TEGRA_KERNEL_OUT}arch/arm64/boot/Image /boot/Image
 sudo cp -r ${TEGRA_KERNEL_OUT}arch/arm64/boot/dts/* /boot/dtb/
