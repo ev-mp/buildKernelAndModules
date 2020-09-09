@@ -46,16 +46,17 @@ fi
 echo "Checking out the proper kernel source version"
 pushd ../linux-${KERNEL_RELEASE}
 TEGRA_TAG=$(git tag -l | grep ${JETSON_L4T_VERSION})
+echo "Matching Tegra tag is ${TEGRA_TAG}"
 #retrieve tegra tag version for sync, required for get and sync kernel source with Jetson:
 #sudo ./source_sync.sh -k <tegra_tag>  (e.g. tegra-l4t-r32.1)
 #https://forums.developer.nvidia.com/t/r32-1-tx2-how-can-i-build-extra-module-in-the-tegra-device/72942/9
-
 popd
-#sudo cp ./source_sync.sh /usr/src
+
+#Use Nvidia-provided script to download source code
 sudo cp source_sync.sh /usr/src
 pushd /usr/src
 echo "Downloading and sync kernel sources using tag ${TEGRA_TAG}, this may take a while..."
-#Evgeni redirect to  null env -i sudo ./source_sync.sh -k ${TEGRA_TAG}
+#??redirect to  null env -i sudo ./source_sync.sh -k ${TEGRA_TAG}
 popd
 
 #nb=""
@@ -64,6 +65,7 @@ popd
 #git reset --hard origin/l4t/l4t-r${JETSON_L4T_VERSION}-${KERNEL_RELEASE}
 echo "/usr/src/sources/kernel/kernel-4.9"
 pushd /usr/src/sources/kernel/kernel-4.9
+#pushd ../linux-${KERNEL_RELEASE}
 
 TEGRA_KERNEL_OUT=./OutDir/
 #$ cd <kernel_source>
@@ -82,15 +84,18 @@ sudo sed -i '/CONFIG_HID_SENSOR_IIO_COMMON/c\CONFIG_HID_SENSOR_IIO_COMMON=m\nCON
 pwd
 
 echo "Build Kernel Monolythic image"
-#Clean hte previous build
+#Clean the previous build
 sudo make mrproper
 #Build module image 
 sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT -j$(($(nproc)-1))
-sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_prepare
-sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules
-sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_install
+sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_prepare -j$(($(nproc)-1))
+sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT dtbs -j$(($(nproc)-1))
+sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules -j$(($(nproc)-1))
+#sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT INSTALL_MOD_PATH=/tmp/nn modules_install
 sudo cp ${TEGRA_KERNEL_OUT}arch/arm64/boot/Image /boot/Image
 sudo cp -r ${TEGRA_KERNEL_OUT}arch/arm64/boot/dts/* /boot/dtb/
+sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_install -j$(($(nproc)-1))
+sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT install -j$(($(nproc)-1))
 #sudo -s time make -j$(($(nproc)-1)) modules_prepare
 #sudo -s time make -j$(($(nproc)-1)) Image
 #sudo -s time make -j$(($(nproc)-1)) modules
