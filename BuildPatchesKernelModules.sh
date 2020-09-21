@@ -4,14 +4,30 @@
 # MIT License
 #Modified Script to Build Jetson Nano and Xavier AGX V4l/HID modules
 # Error out if something goes wrong
+#cd ~/git/buildKernelAndModules/
+#source ./patch-utils.sh 
+#TEGRA_TAG=tegra-l4t-r32.4.3
+scripts_dir=$(pwd)
+#sudo rm -rf /lib/modules/`uname -r`/kernel/drivers/iio
+#sudo rm -rf ${TEGRA_TAG}-*.ko
+
 set -e
 echo "The script shall build and installed patched kernel and modules for Librealsense SDK/ with v4l/hid backend"
 echo "Note: the patch makes changes to kernel device tree to support HID IMU sensors"
+source ./patch-utils.sh
 
-#JETSON_MODEL="NVIDIA Jetson Nano Developer Kit"
-#L4T_TARGET="32.4.3"
-SOURCE_TARGET="$pwd../"
-#SOURCE_TARGET="/usr/src"
+#cd ~/git/buildKernelAndModules/
+#source ./patch-utils.sh 
+#TEGRA_TAG=tegra-l4t-r32.4.3
+#scripts_dir=$(pwd)
+#sudo rm -rf /lib/modules/`uname -r`/kernel/drivers/iio
+#sudo rm -rf ${TEGRA_TAG}-*.ko
+
+#Evgeni TODO - Add empty space check - require 3Gb (2+ required for git clone)
+#du -hs / 
+#df -h --total | head -n 2 | tail -n 1 | awk '{print $3}' -> prints 18G
+
+
 KERNEL_RELEASE="4.9"
 
 # < is more efficient than cat command
@@ -21,7 +37,7 @@ echo "Jetson Board (proc/device-tree/model): "$JETSON_BOARD
 
 JETSON_L4T=""
 
-# L4T 32.3.1, NVIDIA added back /etc/nv_tegra_release
+# With L4T 32.3.1, NVIDIA added back /etc/nv_tegra_release
 if [ -f /etc/nv_tegra_release ]; then
 	JETSON_L4T_STRING=$(head -n 1 /etc/nv_tegra_release)
 	JETSON_L4T_RELEASE=$(echo $JETSON_L4T_STRING | cut -f 2 -d ' ' | grep -Po '(?<=R)[^;]+')
@@ -32,150 +48,122 @@ else
 	echo "/etc/nv_tegra_release not present, aborting script"
 	exit;
 fi
+echo "Jetson L4T version is "${JETSON_L4T_VERSION}
 
-echo "Cloning Nvidia Tegra kernel source tree into ../linux-4.9"
-if [ ! -d ../linux-4.9 ]; then
-	pushd ../
-	git clone git://nv-tegra.nvidia.com/linux-${KERNEL_RELEASE}
+# Get the linux kernel and change into source tree
+echo "Obtain the correspondig L4T git tag for the kernenl source tree"
+l4t_gh_dir=../linux-${KERNEL_RELEASE}-source-tree
+if [ ! -d ${l4t_gh_dir} ]; then
+	mkdir ${l4t_gh_dir}
+	pushd ${l4t_gh_dir}
+	git init
+	git remote add origin git://nv-tegra.nvidia.com/linux-${KERNEL_RELEASE}
+	# Use Nvidia script instead to synchronize source tree and peripherals
+	#git clone git://nv-tegra.nvidia.com/linux-${KERNEL_RELEASE}
 	popd
 else
-	echo "Library already present, skipping the stage..."
+	echo "Directory ${l4t_gh_dir} is present, skipping initialization..."
 fi
 
+#Search the repository for the tag that matches the mmaj.min.patch-build of Ubuntu kernel
+pushd ${l4t_gh_dir}
+TEGRA_TAG=$(git ls-remote --tags origin | grep ${JETSON_L4T_VERSION} | grep '[^^{}]$' | tail -n 1 | awk -F/ '{print $NF}')
+echo "The corresponding tag is ${TEGRA_TAG}"
+echo -e "\e[32mThe matching L4T source tree tag is \e[47m${TEGRA_TAG}\e[0m"
+popd
 
-echo "Checking out the proper kernel source version"
-pushd ../linux-${KERNEL_RELEASE}
-TEGRA_TAG=$(git tag -l | grep ${JETSON_L4T_VERSION})
-echo "Matching Tegra tag is ${TEGRA_TAG}"
+
 #retrieve tegra tag version for sync, required for get and sync kernel source with Jetson:
-#sudo ./source_sync.sh -k <tegra_tag>  (e.g. tegra-l4t-r32.1)
 #https://forums.developer.nvidia.com/t/r32-1-tx2-how-can-i-build-extra-module-in-the-tegra-device/72942/9
-popd
+sudo ./source_sync.sh -k ${TEGRA_TAG}
 
-#Use Nvidia-provided script to download source code
-sudo cp source_sync.sh /usr/src
-pushd /usr/src
-echo "Downloading and sync kernel sources using tag ${TEGRA_TAG}, this may take a while..."
-#??redirect to  null env -i sudo ./source_sync.sh -k ${TEGRA_TAG}
-popd
+scripts_dir=$(pwd)
+L4T_Patches_Dir=${scripts_dir}/LRS_Patches/
+if [ ! -d ${L4T_Patches_Dir} ]; then
+	echo "The L4T kernel patches directory  ${L4T_Patches_Dir} was not found, aborting"
+	exit 1
+fi
 
-#nb=""
-#[ $(git branch | grep sandbox | wc -l) -ne 1 ] && nb=" -b"
-#git checkout ${nb} sandbox
-#git reset --hard origin/l4t/l4t-r${JETSON_L4T_VERSION}-${KERNEL_RELEASE}
-echo "/usr/src/sources/kernel/kernel-4.9"
-pushd /usr/src/sources/kernel/kernel-4.9
-#pushd ../linux-${KERNEL_RELEASE}
+KBASE=./sources/kernel/kernel-4.9
+echo ${KBASE}
+pushd ${KBASE}
 
-TEGRA_KERNEL_OUT=./OutDir/
-#$ cd <kernel_source>
-sudo mkdir -p $TEGRA_KERNEL_OUT
 
-# Go get the default config file; this becomes the new system configuration
-#sudo make olddefconfig
-sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT tegra_defconfig
-# Make a backup of the original configuration
-sudo cp ${TEGRA_KERNEL_OUT}.config config_bkp.$(date -Ins)
-
-#echo "Modify kernel tree to support HID IMU sensors"
-sudo sed -i '/CONFIG_HID_SENSOR_ACCEL_3D/c\CONFIG_HID_SENSOR_ACCEL_3D=m' ${TEGRA_KERNEL_OUT}.config
-sudo sed -i '/CONFIG_HID_SENSOR_GYRO_3D/c\CONFIG_HID_SENSOR_GYRO_3D=m' ${TEGRA_KERNEL_OUT}.config
-sudo sed -i '/CONFIG_HID_SENSOR_IIO_COMMON/c\CONFIG_HID_SENSOR_IIO_COMMON=m\nCONFIG_HID_SENSOR_IIO_TRIGGER=m' ${TEGRA_KERNEL_OUT}.config
-pwd
-
-echo "Build Kernel Monolythic image"
 #Clean the previous build
-sudo make mrproper
-#Build module image 
-sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT -j$(($(nproc)-1))
-sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_prepare -j$(($(nproc)-1))
-sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT dtbs -j$(($(nproc)-1))
-sudo -s time make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules -j$(($(nproc)-1))
-#sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT INSTALL_MOD_PATH=/tmp/nn modules_install
-sudo cp ${TEGRA_KERNEL_OUT}arch/arm64/boot/Image /boot/Image
-sudo cp -r ${TEGRA_KERNEL_OUT}arch/arm64/boot/dts/* /boot/dtb/
-sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT modules_install -j$(($(nproc)-1))
-sudo make ARCH=arm64 O=$TEGRA_KERNEL_OUT install -j$(($(nproc)-1))
-#sudo -s time make -j$(($(nproc)-1)) modules_prepare
-#sudo -s time make -j$(($(nproc)-1)) Image
-#sudo -s time make -j$(($(nproc)-1)) modules
+sudo make ARCH=arm64 mrproper -j$(($(nproc)-1)) && sudo make ARCH=arm64 tegra_defconfig -j$(($(nproc)-1))
+#Reuse existing module.symver
+sudo cp /usr/src/linux-headers-4.9.140-tegra-ubuntu18.04_aarch64/kernel-4.9/Module.symvers .
 
+echo "Update the kernel tree to support HID IMU sensors"
+sudo sed -i '/CONFIG_HID_SENSOR_ACCEL_3D/c\CONFIG_HID_SENSOR_ACCEL_3D=m' .config
+sudo sed -i '/CONFIG_HID_SENSOR_GYRO_3D/c\CONFIG_HID_SENSOR_GYRO_3D=m' .config
+sudo sed -i '/CONFIG_HID_SENSOR_IIO_COMMON/c\CONFIG_HID_SENSOR_IIO_COMMON=m\nCONFIG_HID_SENSOR_IIO_TRIGGER=m' .config
+sudo make ARCH=arm64 prepare modules_prepare  -j$(($(nproc)-1))
+
+echo "Copy and apply Librealsense Kernel Patches"
+sudo cp -r ${L4T_Patches_Dir} .
+sudo -s patch -p1 < ./LRS_Patches/01-realsense-camera-formats-L4T-4.9.patch
+sudo -s patch -p1 < ./LRS_Patches/02-realsense-metadata-L4T-4.9.patch
+sudo -s patch -p1 < ./LRS_Patches/03-realsense-hid-L4T-4.9.patch
+sudo -s patch -p1 < ./LRS_Patches/04-media-uvcvideo-mark-buffer-error-where-overflow.patch
+sudo -s patch -p1 < ./LRS_Patches/05-realsense-powerlinefrequency-control-fix.patch
+
+# sudo apt-get install module-assistant
+# from https://forums.developer.nvidia.com/t/solved-l4t-compiling-simple-kernel-module-fails/36955/6
+#to handle ./scripts/recordmcount: not found
+#sudo make ARCH=arm64 scripts
+
+
+echo -e "\e[32mCompiling accelerometer and gyro modules\e[0m"
+sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=drivers/iio modules
+#Due to symbol changes the whole subtree is recompiled
+#sudo -s make -j -C $KBASE M=$KBASE/drivers/iio/accel modules
+#sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=$KBASE/drivers/iio/accel modules
+#sudo -s make -j -C $KBASE M=$KBASE/drivers/iio/gyro modules
+#sudo -s make -j$(($(nproc)-1)) ARCH=arm64  $KBASE M=$KBASE/drivers/iio/gyro modules
+
+#IIO build w/o symver, UVC  -yes
+#sudo cp /usr/src/linux-headers-4.9.140-tegra-ubuntu18.04_aarch64/kernel-4.9/Module.symvers .
+echo -e "\e[32mCompiling uvc module\e[0m"
+#sudo -s make -j -C $KBASE M=$KBASE/drivers/media/usb/uvc/ modules
+sudo -s make -j$(($(nproc)-1)) ARCH=arm64 M=drivers/media/usb/uvc/ modules
+echo -e "\e[32mCompiling v4l2-core modules\e[0m"
+#sudo -s make -j -C $KBASE M=$KBASE/drivers/media/v4l2-core modules
+sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=drivers/media/v4l2-core modules
+
+echo -e "\e[32mCopying the patched modules to ${scripts_dir} \e[0m"
+sudo cp drivers/media/usb/uvc/uvcvideo.ko ${scripts_dir}/${TEGRA_TAG}-uvcvideo.ko
+sudo cp drivers/media/v4l2-core/videobuf-vmalloc.ko ${scripts_dir}/${TEGRA_TAG}-videobuf-vmalloc.ko
+sudo cp drivers/media/v4l2-core/videobuf-core.ko ${scripts_dir}/${TEGRA_TAG}-videobuf-core.ko
+sudo cp drivers/iio/common/hid-sensors/hid-sensor-iio-common.ko ${scripts_dir}/${TEGRA_TAG}-hid-sensor-iio-common.ko
+sudo cp drivers/iio/common/hid-sensors/hid-sensor-trigger.ko ${scripts_dir}/${TEGRA_TAG}-hid-sensor-trigger.ko
+sudo cp drivers/iio/accel/hid-sensor-accel-3d.ko ${scripts_dir}/${TEGRA_TAG}-hid-sensor-accel-3d.ko
+sudo cp drivers/iio/gyro/hid-sensor-gyro-3d.ko ${scripts_dir}/${TEGRA_TAG}-hid-sensor-gyro-3d.ko
 popd
 
+#Optional - create kernel modules directories in kernel tree
+sudo mkdir -p /lib/modules/`uname -r`/kernel/drivers/iio/accel
+sudo mkdir -p /lib/modules/`uname -r`/kernel/drivers/iio/gyro
+sudo mkdir -p /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors
+sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-accel-3d.ko     /lib/modules/`uname -r`/kernel/drivers/iio/accel/hid-sensor-accel-3d.ko
+sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-gyro-3d.ko      /lib/modules/`uname -r`/kernel/drivers/iio/gyro/hid-sensor-gyro-3d.ko
+sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-iio-common.ko   /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-iio-common.ko
+sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-trigger.ko      /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-trigger.ko
 
-echo Evgeni Done!
-exit
-
-#env -i sudo ./source_sync.sh -k tegra-l4t-r32.2.3-1
-
-#echo "Getting L4T Version"
-#check_L4T_version
-#JETSON_L4T="$JETSON_L4T_VERSION"
-
-red=`tput setaf 1`
-green=`tput setaf 2`
-reset=`tput sgr0`
-# e.g. echo "${red}The red tail hawk ${green}loves the green grass${reset}"
-
-#LAST="${SOURCE_TARGET: -1}"
-#if [ $LAST != '/' ] ; then
-#   SOURCE_TARGET="$SOURCE_TARGET""/"
-#fi
-
-INSTALL_DIR=$PWD
+# update kernel module dependencies
+echo -e "\e[32mInsert the modified kernel modules\e[0m"
+sudo depmod
+try_module_insert uvcvideo              ${scripts_dir}/${TEGRA_TAG}-uvcvideo.ko                /lib/modules/`uname -r`/kernel/drivers/media/usb/uvc/uvcvideo.ko
+try_module_insert hid_sensor_accel_3d   ${scripts_dir}/${TEGRA_TAG}-hid-sensor-accel-3d.ko     /lib/modules/`uname -r`/kernel/drivers/iio/accel/hid-sensor-accel-3d.ko
+try_module_insert hid_sensor_gyro_3d    ${scripts_dir}/${TEGRA_TAG}-hid-sensor-gyro-3d.ko      /lib/modules/`uname -r`/kernel/drivers/iio/gyro/hid-sensor-gyro-3d.ko
+#Preventively unload all HID-related modules
+try_unload_module hid_sensor_accel_3d
+try_unload_module hid_sensor_gyro_3d
+try_unload_module hid_sensor_trigger
+try_unload_module hid_sensor_trigger
+try_module_insert hid_sensor_trigger    ${scripts_dir}/${TEGRA_TAG}-hid-sensor-trigger.ko      /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-trigger.ko
+try_module_insert hid_sensor_iio_common ${scripts_dir}/${TEGRA_TAG}-hid-sensor-iio-common.ko   /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-iio-common.ko
 
 
-
-# Check to make sure we're installing the correct kernel sources
-# Determine the correct kernel version
-# The KERNEL_BUILD_VERSION is the release tag for the JetsonHacks buildKernel repository
-#KERNEL_BUILD_VERSION=master
-#if [ "$JETSON_BOARD" == "$JETSON_MODEL" ] ; then 
-  #if [ $JETSON_L4T == "$L4T_TARGET" ] ; then
-     #KERNEL_BUILD_VERSION=$L4T_TARGET
-  #else
-   #echo ""
-   #tput setaf 1
-   #echo "==== L4T Kernel Version Mismatch! ============="
-   #tput sgr0
-   #echo ""
-   #echo "This repository is for modifying the kernel for a L4T "$L4T_TARGET "system." 
-   #echo "You are attempting to modify a L4T "$JETSON_MODEL "system with L4T "$JETSON_L4T
-   #echo "The L4T releases must match!"
-   #echo ""
-   #echo "There may be versions in the tag/release sections that meet your needs"
-   #echo ""
-   #exit 1
-  #fi
-#else 
-   #tput setaf 1
-   #echo "==== Jetson Board Mismatch! ============="
-   #tput sgr0
-    #echo "Currently this script works for the $JETSON_MODEL."
-   #echo "This processor appears to be a $JETSON_BOARD, which does not have a corresponding script"
-   #echo ""
-   #echo "Exiting"
-   #exit 1
-#fi
-
-## Check to see if source tree is already installed
-#PROPOSED_SRC_PATH="$SOURCE_TARGET""kernel/kernel-"$KERNEL_RELEASE
-#echo "Proposed source path: ""$PROPOSED_SRC_PATH"
-#if [ -d "$PROPOSED_SRC_PATH" ]; then
-  #tput setaf 1
-  #echo "==== Kernel source appears to already be installed! =============== "
-  #tput sgr0
-  #echo "The kernel source appears to already be installed at: "
-  #echo "   ""$PROPOSED_SRC_PATH"
-  #echo "If you want to reinstall the source files, first remove the directories: "
-  #echo "  ""$SOURCE_TARGET""kernel"
-  #echo "  ""$SOURCE_TARGET""hardware"
-  #echo "then rerun this script"
-  #exit 1
-#fi
-
-#export SOURCE_TARGET
-## -E preserves environment variables
-#sudo -E ./scripts/getKernelSources.sh
-
+echo -e "\e[92m\n\e[1mScript has completed. Please consult the installation guide for further instruction.\n\e[0m"
 
