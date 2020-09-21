@@ -3,13 +3,6 @@
 # Copyright (c) 2016-19 Jetsonhacks 
 # MIT License
 #Modified Script to Build Jetson Nano and Xavier AGX V4l/HID modules
-# Error out if something goes wrong
-#cd ~/git/buildKernelAndModules/
-#source ./patch-utils.sh 
-#TEGRA_TAG=tegra-l4t-r32.4.3
-scripts_dir=$(pwd)
-#sudo rm -rf /lib/modules/`uname -r`/kernel/drivers/iio
-#sudo rm -rf ${TEGRA_TAG}-*.ko
 
 set -e
 echo "The script shall build and installed patched kernel and modules for Librealsense SDK/ with v4l/hid backend"
@@ -28,10 +21,9 @@ source ./patch-utils.sh
 #df -h --total | head -n 2 | tail -n 1 | awk '{print $3}' -> prints 18G
 
 
+#Tegra-specific
 KERNEL_RELEASE="4.9"
-
-# < is more efficient than cat command
-# NULL byte at end of board description gets bash upset; strip it out
+#Identify the Jetson board
 JETSON_BOARD=$(tr -d '\0' </proc/device-tree/model)
 echo "Jetson Board (proc/device-tree/model): "$JETSON_BOARD
 
@@ -50,8 +42,8 @@ else
 fi
 echo "Jetson L4T version is "${JETSON_L4T_VERSION}
 
-# Get the linux kernel and change into source tree
-echo "Obtain the correspondig L4T git tag for the kernenl source tree"
+# Get the linux kernel repo, extract the L4T tag
+echo "Obtain the correspondig L4T git tag for the kernel source tree"
 l4t_gh_dir=../linux-${KERNEL_RELEASE}-source-tree
 if [ ! -d ${l4t_gh_dir} ]; then
 	mkdir ${l4t_gh_dir}
@@ -65,7 +57,7 @@ else
 	echo "Directory ${l4t_gh_dir} is present, skipping initialization..."
 fi
 
-#Search the repository for the tag that matches the mmaj.min.patch-build of Ubuntu kernel
+#Search the repository for the tag that matches the maj.min for L4T
 pushd ${l4t_gh_dir}
 TEGRA_TAG=$(git ls-remote --tags origin | grep ${JETSON_L4T_VERSION} | grep '[^^{}]$' | tail -n 1 | awk -F/ '{print $NF}')
 echo "The corresponding tag is ${TEGRA_TAG}"
@@ -75,33 +67,36 @@ popd
 
 #retrieve tegra tag version for sync, required for get and sync kernel source with Jetson:
 #https://forums.developer.nvidia.com/t/r32-1-tx2-how-can-i-build-extra-module-in-the-tegra-device/72942/9
-sudo ./source_sync.sh -k ${TEGRA_TAG}
-
+#Download kernel and peripheral sources as the L4T github repo is not self-contained to build kernel modules
 scripts_dir=$(pwd)
-L4T_Patches_Dir=${scripts_dir}/LRS_Patches/
-if [ ! -d ${L4T_Patches_Dir} ]; then
-	echo "The L4T kernel patches directory  ${L4T_Patches_Dir} was not found, aborting"
-	exit 1
-fi
-
+echo -e "\e[32mCreate the sandbox - NVidia L4T source tree(s)\e[0m"
+sudo ./source_sync.sh -k ${TEGRA_TAG}
 KBASE=./sources/kernel/kernel-4.9
 echo ${KBASE}
 pushd ${KBASE}
 
+echo -e "\e[32mCopy LibRealSense patches to the sandbox\e[0m"
+L4T_Patches_Dir=${scripts_dir}/LRS_Patches/
+if [ ! -d ${L4T_Patches_Dir} ]; then
+	echo -e "\e[41mThe L4T kernel patches directory  ${L4T_Patches_Dir} was not found, aborting\e[0m"
+	exit 1
+else
+	sudo cp -r ${L4T_Patches_Dir} .
+fi
 
-#Clean the previous build
+#Clean the kernel WS
+echo -e "\e[32mPrepare workspace for kernel build\e[0m"
 sudo make ARCH=arm64 mrproper -j$(($(nproc)-1)) && sudo make ARCH=arm64 tegra_defconfig -j$(($(nproc)-1))
 #Reuse existing module.symver
 sudo cp /usr/src/linux-headers-4.9.140-tegra-ubuntu18.04_aarch64/kernel-4.9/Module.symvers .
 
-echo "Update the kernel tree to support HID IMU sensors"
+echo "\e[32mUpdate the kernel tree to support HID IMU sensors\e[0m"
 sudo sed -i '/CONFIG_HID_SENSOR_ACCEL_3D/c\CONFIG_HID_SENSOR_ACCEL_3D=m' .config
 sudo sed -i '/CONFIG_HID_SENSOR_GYRO_3D/c\CONFIG_HID_SENSOR_GYRO_3D=m' .config
 sudo sed -i '/CONFIG_HID_SENSOR_IIO_COMMON/c\CONFIG_HID_SENSOR_IIO_COMMON=m\nCONFIG_HID_SENSOR_IIO_TRIGGER=m' .config
 sudo make ARCH=arm64 prepare modules_prepare  -j$(($(nproc)-1))
 
-echo "Copy and apply Librealsense Kernel Patches"
-sudo cp -r ${L4T_Patches_Dir} .
+echo "\e[32mApply Librealsense Kernel Patches\e[0m"
 sudo -s patch -p1 < ./LRS_Patches/01-realsense-camera-formats-L4T-4.9.patch
 sudo -s patch -p1 < ./LRS_Patches/02-realsense-metadata-L4T-4.9.patch
 sudo -s patch -p1 < ./LRS_Patches/03-realsense-hid-L4T-4.9.patch
@@ -113,23 +108,14 @@ sudo -s patch -p1 < ./LRS_Patches/05-realsense-powerlinefrequency-control-fix.pa
 #to handle ./scripts/recordmcount: not found
 #sudo make ARCH=arm64 scripts
 
-
-echo -e "\e[32mCompiling accelerometer and gyro modules\e[0m"
-sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=drivers/iio modules
-#Due to symbol changes the whole subtree is recompiled
-#sudo -s make -j -C $KBASE M=$KBASE/drivers/iio/accel modules
-#sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=$KBASE/drivers/iio/accel modules
-#sudo -s make -j -C $KBASE M=$KBASE/drivers/iio/gyro modules
-#sudo -s make -j$(($(nproc)-1)) ARCH=arm64  $KBASE M=$KBASE/drivers/iio/gyro modules
-
-#IIO build w/o symver, UVC  -yes
-#sudo cp /usr/src/linux-headers-4.9.140-tegra-ubuntu18.04_aarch64/kernel-4.9/Module.symvers .
 echo -e "\e[32mCompiling uvc module\e[0m"
 #sudo -s make -j -C $KBASE M=$KBASE/drivers/media/usb/uvc/ modules
 sudo -s make -j$(($(nproc)-1)) ARCH=arm64 M=drivers/media/usb/uvc/ modules
 echo -e "\e[32mCompiling v4l2-core modules\e[0m"
 #sudo -s make -j -C $KBASE M=$KBASE/drivers/media/v4l2-core modules
 sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=drivers/media/v4l2-core modules
+echo -e "\e[32mCompiling accelerometer and gyro modules\e[0m"
+sudo -s make -j$(($(nproc)-1)) ARCH=arm64  M=drivers/iio modules
 
 echo -e "\e[32mCopying the patched modules to ${scripts_dir} \e[0m"
 sudo cp drivers/media/usb/uvc/uvcvideo.ko ${scripts_dir}/${TEGRA_TAG}-uvcvideo.ko
@@ -141,6 +127,7 @@ sudo cp drivers/iio/accel/hid-sensor-accel-3d.ko ${scripts_dir}/${TEGRA_TAG}-hid
 sudo cp drivers/iio/gyro/hid-sensor-gyro-3d.ko ${scripts_dir}/${TEGRA_TAG}-hid-sensor-gyro-3d.ko
 popd
 
+echo -e "\e[32mMove the modified modules into the modules tree\e[0m"
 #Optional - create kernel modules directories in kernel tree
 sudo mkdir -p /lib/modules/`uname -r`/kernel/drivers/iio/accel
 sudo mkdir -p /lib/modules/`uname -r`/kernel/drivers/iio/gyro
@@ -149,10 +136,10 @@ sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-accel-3d.ko     /lib/modules/`un
 sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-gyro-3d.ko      /lib/modules/`uname -r`/kernel/drivers/iio/gyro/hid-sensor-gyro-3d.ko
 sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-iio-common.ko   /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-iio-common.ko
 sudo cp  ${scripts_dir}/${TEGRA_TAG}-hid-sensor-trigger.ko      /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-trigger.ko
-
 # update kernel module dependencies
-echo -e "\e[32mInsert the modified kernel modules\e[0m"
 sudo depmod
+
+echo -e "\e[32mInsert the modified kernel modules\e[0m"
 try_module_insert uvcvideo              ${scripts_dir}/${TEGRA_TAG}-uvcvideo.ko                /lib/modules/`uname -r`/kernel/drivers/media/usb/uvc/uvcvideo.ko
 try_module_insert hid_sensor_accel_3d   ${scripts_dir}/${TEGRA_TAG}-hid-sensor-accel-3d.ko     /lib/modules/`uname -r`/kernel/drivers/iio/accel/hid-sensor-accel-3d.ko
 try_module_insert hid_sensor_gyro_3d    ${scripts_dir}/${TEGRA_TAG}-hid-sensor-gyro-3d.ko      /lib/modules/`uname -r`/kernel/drivers/iio/gyro/hid-sensor-gyro-3d.ko
@@ -164,6 +151,4 @@ try_unload_module hid_sensor_trigger
 try_module_insert hid_sensor_trigger    ${scripts_dir}/${TEGRA_TAG}-hid-sensor-trigger.ko      /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-trigger.ko
 try_module_insert hid_sensor_iio_common ${scripts_dir}/${TEGRA_TAG}-hid-sensor-iio-common.ko   /lib/modules/`uname -r`/kernel/drivers/iio/common/hid-sensors/hid-sensor-iio-common.ko
 
-
 echo -e "\e[92m\n\e[1mScript has completed. Please consult the installation guide for further instruction.\n\e[0m"
-
